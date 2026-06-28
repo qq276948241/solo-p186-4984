@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2024_01_01_000012) do
+ActiveRecord::Schema[7.2].define(version: 2024_01_01_000013) do
   create_table "addresses", force: :cascade do |t|
     t.integer "user_id", null: false
     t.string "recipient_name", null: false
@@ -64,6 +64,20 @@ ActiveRecord::Schema[7.2].define(version: 2024_01_01_000012) do
     t.index ["address_id"], name: "index_orders_on_address_id"
     t.index ["promotion_code_id"], name: "index_orders_on_promotion_code_id"
     t.index ["user_id"], name: "index_orders_on_user_id"
+  end
+
+  create_table "promo_code_redemptions", force: :cascade do |t|
+    t.integer "promotion_code_id", null: false
+    t.integer "user_id", null: false
+    t.integer "order_id"
+    t.integer "subscription_id"
+    t.datetime "redeemed_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["order_id"], name: "index_promo_code_redemptions_on_order_id", unique: true
+    t.index ["promotion_code_id", "user_id"], name: "index_promo_code_redemptions_on_promotion_code_id_and_user_id", unique: true
+    t.index ["subscription_id"], name: "index_promo_code_redemptions_on_subscription_id", unique: true
+    t.index ["user_id"], name: "index_promo_code_redemptions_on_user_id"
   end
 
   create_table "promotion_codes", force: :cascade do |t|
@@ -156,6 +170,10 @@ ActiveRecord::Schema[7.2].define(version: 2024_01_01_000012) do
   add_foreign_key "orders", "addresses"
   add_foreign_key "orders", "promotion_codes"
   add_foreign_key "orders", "users"
+  add_foreign_key "promo_code_redemptions", "orders"
+  add_foreign_key "promo_code_redemptions", "promotion_codes"
+  add_foreign_key "promo_code_redemptions", "subscriptions"
+  add_foreign_key "promo_code_redemptions", "users"
   add_foreign_key "roast_batches", "coffee_beans"
   add_foreign_key "shipments", "addresses"
   add_foreign_key "shipments", "orders"

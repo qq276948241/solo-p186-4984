@@ -145,20 +145,60 @@ RSpec.describe PromotionCode, type: :model do
   end
 
   describe '#record_use!' do
+    let(:user) { create(:user) }
     let(:promo) { create(:promotion_code, max_uses: 10, used_count: 0) }
 
     it 'increments used_count' do
-      promo.record_use!
+      promo.record_use!(user: user)
       expect(promo.reload.used_count).to eq(1)
     end
 
-    it 'returns true on success' do
-      expect(promo.record_use!).to be true
+    it 'returns the redemption record on success' do
+      redemption = promo.record_use!(user: user)
+      expect(redemption).to be_a(PromoCodeRedemption)
+      expect(redemption.user_id).to eq(user.id)
+      expect(redemption.promotion_code_id).to eq(promo.id)
+      expect(redemption.redeemed_at).to be_present
     end
 
     it 'returns false if code is not valid for use' do
-      promo = create(:promotion_code, :used_up)
-      expect(promo.record_use!).to be false
+      used_up_promo = create(:promotion_code, :used_up)
+      expect(used_up_promo.record_use!(user: user)).to be false
+    end
+
+    it 'returns false if user already redeemed the code' do
+      promo.record_use!(user: user)
+      expect(promo.record_use!(user: user)).to be false
+      expect(promo.reload.used_count).to eq(1)
+    end
+
+    it 'associates redemption with order when provided' do
+      order = create(:order, user: user)
+      redemption = promo.record_use!(user: user, redeemable: order)
+      expect(redemption.order_id).to eq(order.id)
+      expect(redemption.subscription_id).to be_nil
+    end
+
+    it 'associates redemption with subscription when provided' do
+      sub = create(:subscription, user: user)
+      redemption = promo.record_use!(user: user, redeemable: sub)
+      expect(redemption.subscription_id).to eq(sub.id)
+      expect(redemption.order_id).to be_nil
+    end
+
+    it 'prevents concurrent uses from exceeding max_uses' do
+      promo = create(:promotion_code, code: 'CONCURRENT', max_uses: 2, used_count: 0)
+      user2 = create(:user)
+      user3 = create(:user)
+      users = [user, user2, user3, user, user2, user3]
+
+      results = users.map do |u|
+        promo.record_use!(user: u)
+      end
+
+      success_count = results.count { |r| r.is_a?(PromoCodeRedemption) }
+      expect(success_count).to eq(2)
+      expect(promo.reload.used_count).to eq(2)
     end
   end
 

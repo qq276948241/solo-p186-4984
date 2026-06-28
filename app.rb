@@ -56,7 +56,7 @@ class CoffeeRoasteryAPI < Sinatra::Base
     end
 
     def validate_promo_code(code)
-      promo, error = PromotionCode.lookup_and_validate(code)
+      promo, error = PromotionCode.lookup_and_validate(code, user_id: current_user&.id)
       halt 422, { error: error }.to_json if error
       promo
     end

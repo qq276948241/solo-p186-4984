@@ -125,6 +125,23 @@ RSpec.describe 'Promotion Code API', type: :request do
         expect(json['order']['promotion_code']).to be_nil
       end
     end
+
+    context 'user already used the code in a subscription' do
+      before do
+        promo = create(:promotion_code, code: 'ALREADYUSED', discount_value: 20)
+        sub = create(:subscription, user: customer)
+        create(:promo_code_redemption, promotion_code: promo, user: customer, subscription: sub)
+      end
+
+      it 'rejects the order even though code is otherwise valid' do
+        post '/api/customers/me/orders',
+          order_params.merge(promo_code: 'ALREADYUSED').to_json, headers
+
+        expect(last_response.status).to eq(422)
+        json = JSON.parse(last_response.body)
+        expect(json['error']).to eq('该优惠码您已使用过')
+      end
+    end
   end
 
   describe 'POST /api/customers/me/subscriptions with promo code' do
@@ -168,6 +185,23 @@ RSpec.describe 'Promotion Code API', type: :request do
         json = JSON.parse(last_response.body)
         expect(json['error']).to eq('优惠码已过期')
         expect(address.reload.locked?).to be false
+      end
+    end
+
+    context 'user already used code in an order' do
+      before do
+        promo = create(:promotion_code, code: 'USEDFIRST', discount_value: 20)
+        order = create(:order, user: customer)
+        create(:promo_code_redemption, promotion_code: promo, user: customer, order: order)
+      end
+
+      it 'rejects the subscription even though code is otherwise valid' do
+        post '/api/customers/me/subscriptions',
+          sub_params.merge(promo_code: 'USEDFIRST').to_json, headers
+
+        expect(last_response.status).to eq(422)
+        json = JSON.parse(last_response.body)
+        expect(json['error']).to eq('该优惠码您已使用过')
       end
     end
   end

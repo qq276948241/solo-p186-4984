@@ -1,6 +1,7 @@
 class PromotionCode < ActiveRecord::Base
   has_many :orders, dependent: :nullify
   has_many :subscriptions, dependent: :nullify
+  has_many :promo_code_redemptions, dependent: :destroy
 
   validates :code, presence: true, uniqueness: { case_sensitive: false }
   validates :discount_type, presence: true, inclusion: { in: %w[fixed percentage] }
@@ -18,7 +19,7 @@ class PromotionCode < ActiveRecord::Base
   scope :with_uses_remaining, -> { where('used_count < max_uses') }
   scope :valid_now, -> { active.not_expired.with_uses_remaining }
 
-  def self.lookup_and_validate(code)
+  def self.lookup_and_validate(code, user_id: nil)
     return [nil, nil] unless code.present?
 
     promo = find_by('UPPER(code) = UPPER(?)', code.strip)
@@ -26,8 +27,13 @@ class PromotionCode < ActiveRecord::Base
     return [nil, '优惠码已停用'] unless promo.active?
     return [nil, '优惠码已过期'] if promo.expired?
     return [nil, '优惠码已用完'] if promo.used_up?
+    return [nil, '该优惠码您已使用过'] if user_id && promo.redeemed_by?(user_id)
 
     [promo, nil]
+  end
+
+  def redeemed_by?(user_id)
+    promo_code_redemptions.exists?(user_id: user_id)
   end
 
   def valid_for_use?
@@ -77,11 +83,25 @@ class PromotionCode < ActiveRecord::Base
     [original_total.to_f - discount, discount]
   end
 
-  def record_use!
-    return false unless valid_for_use?
+  def record_use!(user:, redeemable: nil)
+    transaction do
+      reload.lock!
 
-    increment!(:used_count)
-    true
+      return false unless valid_for_use?
+      return false if redeemed_by?(user.id)
+
+      redemption = promo_code_redemptions.create!(
+        user: user,
+        order: redeemable.is_a?(Order) ? redeemable : nil,
+        subscription: redeemable.is_a?(Subscription) ? redeemable : nil,
+        redeemed_at: Time.current
+      )
+
+      increment!(:used_count)
+      redemption
+    end
+  rescue ActiveRecord::RecordNotUnique
+    false
   end
 
   def uses_remaining

@@ -133,7 +133,7 @@ class CoffeeRoasteryAPI
                     end
           halt 400, { error: '请先添加收货地址' }.to_json unless address
 
-          pricing = Order::Pricing.new(items_data, promo_code)
+          pricing = Order::Pricing.new(items_data, promo_code, user: current_user)
           pricing_result = pricing.calculate
           halt 422, { error: pricing_result.error }.to_json unless pricing_result.valid?
 
@@ -163,7 +163,13 @@ class CoffeeRoasteryAPI
               bean.adjust_stock!(-quantity)
             end
 
-            pricing_result.promotion_code&.record_use!
+            if pricing_result.promotion_code
+              redemption = pricing_result.promotion_code.record_use!(
+                user: current_user,
+                redeemable: order
+              )
+              halt 422, { error: '优惠码使用失败，请重试' }.to_json unless redemption
+            end
           end
 
           status 201
@@ -202,7 +208,7 @@ class CoffeeRoasteryAPI
                     end
           halt 400, { error: '请先添加收货地址' }.to_json unless address
 
-          pricing = Subscription::Pricing.new(items_data, promo_code)
+          pricing = Subscription::Pricing.new(items_data, promo_code, user: current_user)
           pricing_result = pricing.calculate
           halt 422, { error: pricing_result.error }.to_json unless pricing_result.valid?
 
@@ -228,7 +234,14 @@ class CoffeeRoasteryAPI
               )
             end
 
-            pricing_result.promotion_code&.record_use!
+            if pricing_result.promotion_code
+              redemption = pricing_result.promotion_code.record_use!(
+                user: current_user,
+                redeemable: sub
+              )
+              halt 422, { error: '优惠码使用失败，请重试' }.to_json unless redemption
+            end
+
             sub.lock_address!
           end
 

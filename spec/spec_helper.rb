@@ -152,6 +152,12 @@ FactoryBot.define do
     end
   end
 
+  factory :promo_code_redemption do
+    promotion_code
+    user
+    redeemed_at { Time.current }
+  end
+
   factory :roast_batch do
     coffee_bean
     roast_quantity_grams { 2000 }

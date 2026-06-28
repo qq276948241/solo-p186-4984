@@ -11,9 +11,10 @@ class BasePricing
 
   attr_reader :result
 
-  def initialize(items_data, promo_code_str)
+  def initialize(items_data, promo_code_str, user: nil)
     @items_data = items_data || []
     @promo_code_str = promo_code_str
+    @user = user
   end
 
   def calculate
@@ -45,7 +46,10 @@ class BasePricing
     end
 
     unless error
-      promo, promo_error = PromotionCode.lookup_and_validate(@promo_code_str)
+      promo, promo_error = PromotionCode.lookup_and_validate(
+        @promo_code_str,
+        user_id: @user&.id
+      )
       if promo_error
         error = promo_error
       elsif promo
