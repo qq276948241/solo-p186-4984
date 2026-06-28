@@ -54,6 +54,42 @@ class CoffeeRoasteryAPI < Sinatra::Base
       halt 400, { error: '请求体格式错误' }.to_json
     end
 
+    def validate_promo_code(code)
+      return nil unless code.present?
+
+      promo = PromotionCode.find_by('UPPER(code) = UPPER(?)', code.strip)
+
+      unless promo
+        halt 422, { error: '优惠码不存在' }.to_json
+      end
+
+      unless promo.active?
+        halt 422, { error: '优惠码已停用' }.to_json
+      end
+
+      if promo.expired?
+        halt 422, { error: '优惠码已过期' }.to_json
+      end
+
+      if promo.used_up?
+        halt 422, { error: '优惠码已用完' }.to_json
+      end
+
+      promo
+    end
+
+    def promotion_code_attributes(promo)
+      {
+        id: promo.id,
+        code: promo.code,
+        discount_type: promo.discount_type,
+        discount_type_display: promo.discount_type_display,
+        discount_value: promo.discount_value.to_f,
+        discount_description: promo.discount_description,
+        description: promo.description
+      }
+    end
+
     def serialize(object, options = {})
       return nil if object.nil?
 
@@ -84,6 +120,8 @@ class CoffeeRoasteryAPI < Sinatra::Base
         roast_batch_attributes(object, options)
       when Shipment
         shipment_attributes(object, options)
+      when PromotionCode
+        promotion_code_attributes(object)
       else
         object.as_json
       end
@@ -138,6 +176,8 @@ class CoffeeRoasteryAPI < Sinatra::Base
         status: order.status,
         status_display: order.status_display,
         order_type: order.order_type,
+        subtotal: order.subtotal.to_f,
+        discount_amount: order.discount_amount.to_f,
         total_amount: order.total_amount.to_f,
         delivered_at: order.delivered_at,
         created_at: order.created_at
@@ -147,6 +187,9 @@ class CoffeeRoasteryAPI < Sinatra::Base
       end
       if options[:include_address] && order.address
         result[:address] = address_attributes(order.address)
+      end
+      if options[:include_promo] && order.promotion_code
+        result[:promotion_code] = promotion_code_attributes(order.promotion_code)
       end
       result
     end
@@ -175,6 +218,8 @@ class CoffeeRoasteryAPI < Sinatra::Base
         start_date: sub.start_date,
         next_delivery_date: sub.next_delivery_date,
         skip_next_count: sub.skip_next_count,
+        subtotal: sub.subtotal.to_f,
+        discount_amount: sub.discount_amount.to_f,
         total_amount_per_delivery: sub.total_amount_per_delivery.to_f,
         created_at: sub.created_at
       }
@@ -183,6 +228,9 @@ class CoffeeRoasteryAPI < Sinatra::Base
       end
       if options[:include_address] && sub.address
         result[:address] = address_attributes(sub.address)
+      end
+      if options[:include_promo] && sub.promotion_code
+        result[:promotion_code] = promotion_code_attributes(sub.promotion_code)
       end
       result
     end

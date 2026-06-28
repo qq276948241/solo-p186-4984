@@ -108,20 +108,21 @@ class CoffeeRoasteryAPI
       namespace '/orders' do
         get do
           orders = Order.history_for(current_user)
-          { orders: serialize(orders, include_items: true, include_address: true) }.to_json
+          { orders: serialize(orders, include_items: true, include_address: true, include_promo: true) }.to_json
         end
 
         get '/:id' do
           order = current_user.orders.find_by(id: params[:id])
           halt 404, { error: '订单不存在' }.to_json unless order
 
-          { order: serialize(order, include_items: true, include_address: true) }.to_json
+          { order: serialize(order, include_items: true, include_address: true, include_promo: true) }.to_json
         end
 
         post do
           data = parse_request_body
           items_data = data['items']
           address_id = data['address_id']
+          promo_code = data['promo_code']
 
           halt 400, { error: '缺少商品明细' }.to_json unless items_data.is_a?(Array) && items_data.any?
 
@@ -132,13 +133,16 @@ class CoffeeRoasteryAPI
                     end
           halt 400, { error: '请先添加收货地址' }.to_json unless address
 
+          promo = validate_promo_code(promo_code)
+
           order = nil
           ActiveRecord::Base.transaction do
             order = current_user.orders.create!(
               address: address,
               order_type: 'one_time',
               status: 'pending',
-              total_amount: 0
+              total_amount: 0,
+              discount_amount: 0
             )
 
             items_data.each do |item_data|
@@ -157,25 +161,31 @@ class CoffeeRoasteryAPI
               bean.adjust_stock!(-quantity)
             end
 
+            if promo
+              order.promotion_code = promo
+              order.discount_amount = promo.calculate_discount(order.subtotal)
+              promo.record_use!
+            end
+
             order.calculate_total!
           end
 
           status 201
-          { order: serialize(order.reload, include_items: true, include_address: true) }.to_json
+          { order: serialize(order.reload, include_items: true, include_address: true, include_promo: true) }.to_json
         end
       end
 
       namespace '/subscriptions' do
         get do
           subs = current_user.subscriptions.order(created_at: :desc)
-          { subscriptions: serialize(subs, include_items: true, include_address: true) }.to_json
+          { subscriptions: serialize(subs, include_items: true, include_address: true, include_promo: true) }.to_json
         end
 
         get '/:id' do
           sub = current_user.subscriptions.find_by(id: params[:id])
           halt 404, { error: '订阅不存在' }.to_json unless sub
 
-          { subscription: serialize(sub, include_items: true, include_address: true) }.to_json
+          { subscription: serialize(sub, include_items: true, include_address: true, include_promo: true) }.to_json
         end
 
         post do
@@ -184,6 +194,7 @@ class CoffeeRoasteryAPI
           frequency = data['frequency']
           address_id = data['address_id']
           start_date = data['start_date'] ? Date.parse(data['start_date']) : Date.tomorrow
+          promo_code = data['promo_code']
 
           halt 400, { error: '缺少配送频率' }.to_json unless Subscription::FREQUENCIES.key?(frequency)
           halt 400, { error: '缺少商品明细' }.to_json unless items_data.is_a?(Array) && items_data.any?
@@ -195,6 +206,8 @@ class CoffeeRoasteryAPI
                     end
           halt 400, { error: '请先添加收货地址' }.to_json unless address
 
+          promo = validate_promo_code(promo_code)
+
           sub = nil
           ActiveRecord::Base.transaction do
             sub = current_user.subscriptions.create!(
@@ -203,7 +216,8 @@ class CoffeeRoasteryAPI
               status: 'active',
               start_date: start_date,
               next_delivery_date: start_date,
-              total_amount_per_delivery: 0
+              total_amount_per_delivery: 0,
+              discount_amount: 0
             )
 
             items_data.each do |item_data|
@@ -217,12 +231,18 @@ class CoffeeRoasteryAPI
               )
             end
 
+            if promo
+              sub.promotion_code = promo
+              sub.discount_amount = promo.calculate_discount(sub.subtotal)
+              promo.record_use!
+            end
+
             sub.calculate_total!
             sub.lock_address!
           end
 
           status 201
-          { subscription: serialize(sub.reload, include_items: true, include_address: true) }.to_json
+          { subscription: serialize(sub.reload, include_items: true, include_address: true, include_promo: true) }.to_json
         end
 
         patch '/:id/pause' do
@@ -258,6 +278,30 @@ class CoffeeRoasteryAPI
 
           sub.cancel!
           { subscription: serialize(sub) }.to_json
+        end
+      end
+
+      post '/validate_promo_code' do
+        data = parse_request_body
+        code = data['code']
+        order_subtotal = data['subtotal'].to_f
+
+        promo = validate_promo_code(code)
+
+        if promo
+          discount = promo.calculate_discount(order_subtotal)
+          final_total = (order_subtotal - discount).round(2)
+          final_total = 0 if final_total < 0
+
+          {
+            valid: true,
+            promotion_code: promotion_code_attributes(promo),
+            subtotal: order_subtotal,
+            discount_amount: discount,
+            final_total: final_total
+          }.to_json
+        else
+          { valid: false }.to_json
         end
       end
 

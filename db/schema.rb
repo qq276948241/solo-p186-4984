@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2024_01_01_000010) do
+ActiveRecord::Schema[7.2].define(version: 2024_01_01_000012) do
   create_table "addresses", force: :cascade do |t|
     t.integer "user_id", null: false
     t.string "recipient_name", null: false
@@ -59,8 +59,25 @@ ActiveRecord::Schema[7.2].define(version: 2024_01_01_000010) do
     t.datetime "delivered_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "promotion_code_id"
+    t.decimal "discount_amount", precision: 10, scale: 2, default: "0.0", null: false
     t.index ["address_id"], name: "index_orders_on_address_id"
+    t.index ["promotion_code_id"], name: "index_orders_on_promotion_code_id"
     t.index ["user_id"], name: "index_orders_on_user_id"
+  end
+
+  create_table "promotion_codes", force: :cascade do |t|
+    t.string "code", null: false
+    t.string "discount_type", null: false
+    t.decimal "discount_value", precision: 10, scale: 2, null: false
+    t.datetime "expires_at"
+    t.integer "max_uses", default: 1, null: false
+    t.integer "used_count", default: 0, null: false
+    t.boolean "active", default: true, null: false
+    t.text "description"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["code"], name: "index_promotion_codes_on_code", unique: true
   end
 
   create_table "roast_batches", force: :cascade do |t|
@@ -116,7 +133,10 @@ ActiveRecord::Schema[7.2].define(version: 2024_01_01_000010) do
     t.decimal "total_amount_per_delivery", precision: 10, scale: 2, default: "0.0", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "promotion_code_id"
+    t.decimal "discount_amount", precision: 10, scale: 2, default: "0.0", null: false
     t.index ["address_id"], name: "index_subscriptions_on_address_id"
+    t.index ["promotion_code_id"], name: "index_subscriptions_on_promotion_code_id"
     t.index ["user_id"], name: "index_subscriptions_on_user_id"
   end
 
@@ -134,6 +154,7 @@ ActiveRecord::Schema[7.2].define(version: 2024_01_01_000010) do
   add_foreign_key "order_items", "coffee_beans"
   add_foreign_key "order_items", "orders"
   add_foreign_key "orders", "addresses"
+  add_foreign_key "orders", "promotion_codes"
   add_foreign_key "orders", "users"
   add_foreign_key "roast_batches", "coffee_beans"
   add_foreign_key "shipments", "addresses"
@@ -143,5 +164,6 @@ ActiveRecord::Schema[7.2].define(version: 2024_01_01_000010) do
   add_foreign_key "subscription_items", "coffee_beans"
   add_foreign_key "subscription_items", "subscriptions"
   add_foreign_key "subscriptions", "addresses"
+  add_foreign_key "subscriptions", "promotion_codes"
   add_foreign_key "subscriptions", "users"
 end

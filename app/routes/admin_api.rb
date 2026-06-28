@@ -343,6 +343,91 @@ class CoffeeRoasteryAPI
       end
     end
 
+    namespace '/promotion_codes' do
+      get do
+        codes = PromotionCode.order(created_at: :desc)
+        { promotion_codes: serialize(codes) }.to_json
+      end
+
+      get '/valid' do
+        codes = PromotionCode.valid_now.order(created_at: :desc)
+        { promotion_codes: serialize(codes) }.to_json
+      end
+
+      get '/:id' do
+        code = PromotionCode.find_by(id: params[:id])
+        halt 404, { error: '优惠码不存在' }.to_json unless code
+
+        {
+          promotion_code: promotion_code_attributes(code).merge(
+            used_count: code.used_count,
+            uses_remaining: code.uses_remaining,
+            orders_count: code.orders.count,
+            subscriptions_count: code.subscriptions.count
+          )
+        }.to_json
+      end
+
+      post do
+        data = parse_request_body
+        required = %w[code discount_type discount_value]
+        halt 400, { error: '缺少必要参数' }.to_json unless required.all? { |k| data[k].present? }
+
+        code = PromotionCode.new(
+          code: data['code'].to_s.strip.upcase,
+          discount_type: data['discount_type'],
+          discount_value: data['discount_value'],
+          expires_at: data['expires_at'] ? Time.parse(data['expires_at']) : nil,
+          max_uses: data['max_uses'] || 1,
+          active: data.fetch('active', true),
+          description: data['description']
+        )
+
+        if code.save
+          status 201
+          { promotion_code: promotion_code_attributes(code) }.to_json
+        else
+          status 422
+          { errors: code.errors.full_messages }.to_json
+        end
+      end
+
+      put '/:id' do
+        data = parse_request_body
+        code = PromotionCode.find_by(id: params[:id])
+        halt 404, { error: '优惠码不存在' }.to_json unless code
+
+        updatable = %w[discount_type discount_value expires_at max_uses active description]
+        update_data = data.slice(*updatable)
+        if data['expires_at']
+          update_data['expires_at'] = Time.parse(data['expires_at'])
+        end
+
+        if code.update(update_data)
+          { promotion_code: promotion_code_attributes(code) }.to_json
+        else
+          status 422
+          { errors: code.errors.full_messages }.to_json
+        end
+      end
+
+      patch '/:id/activate' do
+        code = PromotionCode.find_by(id: params[:id])
+        halt 404, { error: '优惠码不存在' }.to_json unless code
+
+        code.update!(active: true)
+        { promotion_code: promotion_code_attributes(code) }.to_json
+      end
+
+      patch '/:id/deactivate' do
+        code = PromotionCode.find_by(id: params[:id])
+        halt 404, { error: '优惠码不存在' }.to_json unless code
+
+        code.update!(active: false)
+        { promotion_code: promotion_code_attributes(code) }.to_json
+      end
+    end
+
     get '/dashboard' do
       today = Date.today
 

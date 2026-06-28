@@ -1,6 +1,7 @@
 class Order < ActiveRecord::Base
   belongs_to :user
   belongs_to :address
+  belongs_to :promotion_code, optional: true
   has_many :order_items, dependent: :destroy
   has_many :shipments, dependent: :nullify
 
@@ -9,6 +10,7 @@ class Order < ActiveRecord::Base
   validates :status, presence: true, inclusion: { in: %w[pending processing shipped delivered cancelled] }
   validates :order_type, presence: true, inclusion: { in: %w[one_time subscription] }
   validates :total_amount, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validates :discount_amount, numericality: { greater_than_or_equal_to: 0 }
 
   STATUSES = {
     'pending' => '待处理',
@@ -24,8 +26,32 @@ class Order < ActiveRecord::Base
     STATUSES[status] || status
   end
 
+  def subtotal
+    order_items.sum(&:subtotal)
+  end
+
+  def apply_promotion_code!(code)
+    promo = PromotionCode.find_by('UPPER(code) = UPPER(?)', code)
+    return false unless promo&.valid_for_use?
+
+    self.promotion_code = promo
+    original_total = subtotal
+    self.discount_amount = promo.calculate_discount(original_total)
+    self.total_amount = (original_total - discount_amount).round(2)
+    self.total_amount = 0 if total_amount < 0
+    save!
+    true
+  end
+
   def calculate_total!
-    self.total_amount = order_items.sum(&:subtotal)
+    original = subtotal
+    self.discount_amount = if promotion_code&.valid_for_use?
+                             promotion_code.calculate_discount(original)
+                           else
+                             0
+                           end
+    self.total_amount = (original - discount_amount).round(2)
+    self.total_amount = 0 if total_amount < 0
     save!
   end
 end

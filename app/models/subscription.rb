@@ -1,6 +1,7 @@
 class Subscription < ActiveRecord::Base
   belongs_to :user
   belongs_to :address
+  belongs_to :promotion_code, optional: true
   has_many :subscription_items, dependent: :destroy
   has_many :shipments, dependent: :nullify
 
@@ -11,6 +12,7 @@ class Subscription < ActiveRecord::Base
   validates :start_date, presence: true
   validates :next_delivery_date, presence: true
   validates :skip_next_count, numericality: { greater_than_or_equal_to: 0 }
+  validates :discount_amount, numericality: { greater_than_or_equal_to: 0 }
 
   FREQUENCIES = {
     'weekly' => { name: '每周', days: 7 },
@@ -62,8 +64,32 @@ class Subscription < ActiveRecord::Base
     update!(next_delivery_date: new_date, skip_next_count: 0)
   end
 
+  def subtotal
+    subscription_items.sum(&:subtotal)
+  end
+
+  def apply_promotion_code!(code)
+    promo = PromotionCode.find_by('UPPER(code) = UPPER(?)', code)
+    return false unless promo&.valid_for_use?
+
+    self.promotion_code = promo
+    original_total = subtotal
+    self.discount_amount = promo.calculate_discount(original_total)
+    self.total_amount_per_delivery = (original_total - discount_amount).round(2)
+    self.total_amount_per_delivery = 0 if total_amount_per_delivery < 0
+    save!
+    true
+  end
+
   def calculate_total!
-    self.total_amount_per_delivery = subscription_items.sum(&:subtotal)
+    original = subtotal
+    self.discount_amount = if promotion_code&.valid_for_use?
+                             promotion_code.calculate_discount(original)
+                           else
+                             0
+                           end
+    self.total_amount_per_delivery = (original - discount_amount).round(2)
+    self.total_amount_per_delivery = 0 if total_amount_per_delivery < 0
     save!
   end
 

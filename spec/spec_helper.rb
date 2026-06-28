@@ -123,6 +123,35 @@ FactoryBot.define do
     subtotal { 170 }
   end
 
+  factory :promotion_code do
+    code { "WELCOME#{rand(1000)}" }
+    discount_type { 'fixed' }
+    discount_value { 30 }
+    max_uses { 100 }
+    used_count { 0 }
+    active { true }
+    expires_at { Time.now + 30 * 24 * 60 * 60 }
+    description { '首次订阅优惠' }
+
+    trait :percentage do
+      discount_type { 'percentage' }
+      discount_value { 20 }
+    end
+
+    trait :expired do
+      expires_at { Time.now - 24 * 60 * 60 }
+    end
+
+    trait :used_up do
+      max_uses { 1 }
+      used_count { 1 }
+    end
+
+    trait :inactive do
+      active { false }
+    end
+  end
+
   factory :roast_batch do
     coffee_bean
     roast_quantity_grams { 2000 }
