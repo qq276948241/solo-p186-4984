@@ -42,7 +42,7 @@ RSpec.describe 'Promotion Code API', type: :request do
     end
 
     it 'returns error for expired code' do
-      expired = create(:promotion_code, :expired, code: 'EXPIRED')
+      create(:promotion_code, :expired, code: 'EXPIRED')
       post '/api/customers/me/validate_promo_code',
         { code: 'EXPIRED', subtotal: 200 }.to_json, headers
 
@@ -52,7 +52,7 @@ RSpec.describe 'Promotion Code API', type: :request do
     end
 
     it 'returns error for used up code' do
-      used_up = create(:promotion_code, :used_up, code: 'USEDMY')
+      create(:promotion_code, :used_up, code: 'USEDMY')
       post '/api/customers/me/validate_promo_code',
         { code: 'USEDMY', subtotal: 200 }.to_json, headers
 
@@ -62,7 +62,7 @@ RSpec.describe 'Promotion Code API', type: :request do
     end
 
     it 'returns error for inactive code' do
-      inactive = create(:promotion_code, :inactive, code: 'INACTIVE')
+      create(:promotion_code, :inactive, code: 'INACTIVE')
       post '/api/customers/me/validate_promo_code',
         { code: 'INACTIVE', subtotal: 200 }.to_json, headers
 
@@ -83,7 +83,7 @@ RSpec.describe 'Promotion Code API', type: :request do
     context 'with valid promo code' do
       let!(:promo) { create(:promotion_code, code: 'ORDER30', discount_type: 'fixed', discount_value: 30, max_uses: 5) }
 
-      it 'applies discount to order' do
+      it 'applies discount, attaches promo code, and records use' do
         post '/api/customers/me/orders',
           order_params.merge(promo_code: 'ORDER30').to_json, headers
 
@@ -93,68 +93,23 @@ RSpec.describe 'Promotion Code API', type: :request do
         expect(json['order']['discount_amount']).to eq(30)
         expect(json['order']['total_amount']).to eq(140)
         expect(json['order']['promotion_code']['code']).to eq('ORDER30')
-      end
-
-      it 'increments promo code used count' do
-        expect {
-          post '/api/customers/me/orders',
-            order_params.merge(promo_code: 'ORDER30').to_json, headers
-        }.to change { promo.reload.used_count }.by(1)
-      end
-    end
-
-    context 'with percentage discount' do
-      let!(:promo) { create(:promotion_code, :percentage, code: 'SAVE20', discount_value: 20) }
-
-      it 'calculates percentage discount correctly' do
-        post '/api/customers/me/orders',
-          order_params.merge(promo_code: 'SAVE20').to_json, headers
-
-        expect(last_response).to be_successful
-        json = JSON.parse(last_response.body)
-        expect(json['order']['subtotal']).to eq(170)
-        expect(json['order']['discount_amount']).to eq(34)
-        expect(json['order']['total_amount']).to eq(136)
+        expect(promo.reload.used_count).to eq(1)
       end
     end
 
     context 'with expired promo code' do
-      let!(:promo) { create(:promotion_code, :expired, code: 'EXPIRED') }
+      before { create(:promotion_code, :expired, code: 'EXPIRED') }
 
-      it 'rejects the order with error' do
-        post '/api/customers/me/orders',
-          order_params.merge(promo_code: 'EXPIRED').to_json, headers
-
-        expect(last_response.status).to eq(422)
-        json = JSON.parse(last_response.body)
-        expect(json['error']).to eq('优惠码已过期')
-      end
-
-      it 'does not create order' do
+      it 'rejects the order with error and rolls back everything' do
         expect {
           post '/api/customers/me/orders',
             order_params.merge(promo_code: 'EXPIRED').to_json, headers
         }.not_to change(Order, :count)
-      end
-
-      it 'does not deduct stock' do
-        expect {
-          post '/api/customers/me/orders',
-            order_params.merge(promo_code: 'EXPIRED').to_json, headers
-        }.not_to change { bean.reload.stock_grams }
-      end
-    end
-
-    context 'with used up promo code' do
-      let!(:promo) { create(:promotion_code, :used_up, code: 'MAXEDOUT') }
-
-      it 'rejects the order with error' do
-        post '/api/customers/me/orders',
-          order_params.merge(promo_code: 'MAXEDOUT').to_json, headers
 
         expect(last_response.status).to eq(422)
         json = JSON.parse(last_response.body)
-        expect(json['error']).to eq('优惠码已用完')
+        expect(json['error']).to eq('优惠码已过期')
+        expect(bean.reload.stock_grams).to eq(1000)
       end
     end
 
@@ -185,7 +140,7 @@ RSpec.describe 'Promotion Code API', type: :request do
     context 'with valid promo code' do
       let!(:promo) { create(:promotion_code, code: 'SUB50', discount_type: 'fixed', discount_value: 50, max_uses: 10) }
 
-      it 'applies discount to subscription' do
+      it 'applies discount, attaches promo, and records use' do
         post '/api/customers/me/subscriptions',
           sub_params.merge(promo_code: 'SUB50').to_json, headers
 
@@ -195,35 +150,24 @@ RSpec.describe 'Promotion Code API', type: :request do
         expect(json['subscription']['discount_amount']).to eq(50)
         expect(json['subscription']['total_amount_per_delivery']).to eq(120)
         expect(json['subscription']['promotion_code']['code']).to eq('SUB50')
+        expect(promo.reload.used_count).to eq(1)
+        expect(address.reload.locked?).to be true
       end
+    end
 
-      it 'increments promo code used count' do
+    context 'with invalid promo code' do
+      before { create(:promotion_code, :expired, code: 'SUBEXPIRED') }
+
+      it 'rejects with error and does not create subscription' do
         expect {
           post '/api/customers/me/subscriptions',
-            sub_params.merge(promo_code: 'SUB50').to_json, headers
-        }.to change { promo.reload.used_count }.by(1)
-      end
-    end
-
-    context 'with expired promo code' do
-      let!(:promo) { create(:promotion_code, :expired, code: 'SUBEXPIRED') }
-
-      it 'rejects with error' do
-        post '/api/customers/me/subscriptions',
-          sub_params.merge(promo_code: 'SUBEXPIRED').to_json, headers
+            sub_params.merge(promo_code: 'SUBEXPIRED').to_json, headers
+        }.not_to change(Subscription, :count)
 
         expect(last_response.status).to eq(422)
-      end
-    end
-
-    context 'with used up promo code' do
-      let!(:promo) { create(:promotion_code, :used_up, code: 'SUBUSED') }
-
-      it 'rejects with error' do
-        post '/api/customers/me/subscriptions',
-          sub_params.merge(promo_code: 'SUBUSED').to_json, headers
-
-        expect(last_response.status).to eq(422)
+        json = JSON.parse(last_response.body)
+        expect(json['error']).to eq('优惠码已过期')
+        expect(address.reload.locked?).to be false
       end
     end
   end

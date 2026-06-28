@@ -9,6 +9,7 @@ set :database_file, './database.yml'
 set :environments, %w[development test production]
 
 Dir[File.join(File.dirname(__FILE__), 'app', 'models', '*.rb')].each { |f| require f }
+Dir[File.join(File.dirname(__FILE__), 'app', 'services', '**', '*.rb')].each { |f| require f }
 
 use Rack::Cors do
   allow do
@@ -55,26 +56,8 @@ class CoffeeRoasteryAPI < Sinatra::Base
     end
 
     def validate_promo_code(code)
-      return nil unless code.present?
-
-      promo = PromotionCode.find_by('UPPER(code) = UPPER(?)', code.strip)
-
-      unless promo
-        halt 422, { error: '优惠码不存在' }.to_json
-      end
-
-      unless promo.active?
-        halt 422, { error: '优惠码已停用' }.to_json
-      end
-
-      if promo.expired?
-        halt 422, { error: '优惠码已过期' }.to_json
-      end
-
-      if promo.used_up?
-        halt 422, { error: '优惠码已用完' }.to_json
-      end
-
+      promo, error = PromotionCode.lookup_and_validate(code)
+      halt 422, { error: error }.to_json if error
       promo
     end
 

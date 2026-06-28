@@ -18,6 +18,18 @@ class PromotionCode < ActiveRecord::Base
   scope :with_uses_remaining, -> { where('used_count < max_uses') }
   scope :valid_now, -> { active.not_expired.with_uses_remaining }
 
+  def self.lookup_and_validate(code)
+    return [nil, nil] unless code.present?
+
+    promo = find_by('UPPER(code) = UPPER(?)', code.strip)
+    return [nil, '优惠码不存在'] unless promo
+    return [nil, '优惠码已停用'] unless promo.active?
+    return [nil, '优惠码已过期'] if promo.expired?
+    return [nil, '优惠码已用完'] if promo.used_up?
+
+    [promo, nil]
+  end
+
   def valid_for_use?
     active? &&
       (expires_at.nil? || expires_at > Time.current) &&

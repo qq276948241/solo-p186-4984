@@ -133,7 +133,9 @@ class CoffeeRoasteryAPI
                     end
           halt 400, { error: '请先添加收货地址' }.to_json unless address
 
-          promo = validate_promo_code(promo_code)
+          pricing = Order::Pricing.new(items_data, promo_code)
+          pricing_result = pricing.calculate
+          halt 422, { error: pricing_result.error }.to_json unless pricing_result.valid?
 
           order = nil
           ActiveRecord::Base.transaction do
@@ -141,33 +143,27 @@ class CoffeeRoasteryAPI
               address: address,
               order_type: 'one_time',
               status: 'pending',
-              total_amount: 0,
-              discount_amount: 0
+              promotion_code: pricing_result.promotion_code,
+              discount_amount: pricing_result.discount_amount,
+              total_amount: pricing_result.final_total
             )
 
-            items_data.each do |item_data|
-              bean = CoffeeBean.active.find_by(id: item_data['coffee_bean_id'])
-              halt 404, { error: "咖啡豆不存在或已下架: #{item_data['coffee_bean_id']}" }.to_json unless bean
-
-              quantity = item_data['quantity_grams'].to_i
+            pricing_result.line_items.each do |li|
+              bean = li[:coffee_bean]
+              quantity = li[:quantity_grams]
               halt 400, { error: "#{bean.name} 库存不足" }.to_json if bean.stock_grams < quantity
 
               order.order_items.create!(
                 coffee_bean: bean,
                 quantity_grams: quantity,
-                unit_price: bean.price_per_100g
+                unit_price: li[:unit_price],
+                subtotal: li[:subtotal]
               )
 
               bean.adjust_stock!(-quantity)
             end
 
-            if promo
-              order.promotion_code = promo
-              order.discount_amount = promo.calculate_discount(order.subtotal)
-              promo.record_use!
-            end
-
-            order.calculate_total!
+            pricing_result.promotion_code&.record_use!
           end
 
           status 201
@@ -206,7 +202,9 @@ class CoffeeRoasteryAPI
                     end
           halt 400, { error: '请先添加收货地址' }.to_json unless address
 
-          promo = validate_promo_code(promo_code)
+          pricing = Subscription::Pricing.new(items_data, promo_code)
+          pricing_result = pricing.calculate
+          halt 422, { error: pricing_result.error }.to_json unless pricing_result.valid?
 
           sub = nil
           ActiveRecord::Base.transaction do
@@ -216,28 +214,21 @@ class CoffeeRoasteryAPI
               status: 'active',
               start_date: start_date,
               next_delivery_date: start_date,
-              total_amount_per_delivery: 0,
-              discount_amount: 0
+              promotion_code: pricing_result.promotion_code,
+              discount_amount: pricing_result.discount_amount,
+              total_amount_per_delivery: pricing_result.final_total
             )
 
-            items_data.each do |item_data|
-              bean = CoffeeBean.active.find_by(id: item_data['coffee_bean_id'])
-              halt 404, { error: "咖啡豆不存在或已下架: #{item_data['coffee_bean_id']}" }.to_json unless bean
-
+            pricing_result.line_items.each do |li|
               sub.subscription_items.create!(
-                coffee_bean: bean,
-                quantity_grams: item_data['quantity_grams'].to_i,
-                unit_price: bean.price_per_100g
+                coffee_bean: li[:coffee_bean],
+                quantity_grams: li[:quantity_grams],
+                unit_price: li[:unit_price],
+                subtotal: li[:subtotal]
               )
             end
 
-            if promo
-              sub.promotion_code = promo
-              sub.discount_amount = promo.calculate_discount(sub.subtotal)
-              promo.record_use!
-            end
-
-            sub.calculate_total!
+            pricing_result.promotion_code&.record_use!
             sub.lock_address!
           end
 
